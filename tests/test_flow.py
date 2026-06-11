@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-import pytest
 
-from train_inspector.flow import BandInterpolator, FlowBand
+from train_inspector.flow import BandInterpolator
 from conftest import make_texture
 
 H = 160

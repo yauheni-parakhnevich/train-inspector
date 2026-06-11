@@ -10,11 +10,14 @@ the slit; the caller falls back to its wide-strip path when flow is unreliable.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 BAND_HALF_W = 96  # base half-width; widened below to always cover the motion
 DIS_PRESET = cv2.DISOPTICAL_FLOW_PRESET_MEDIUM
@@ -42,6 +45,8 @@ def _smooth1d(v: np.ndarray, k: int) -> np.ndarray:
 
 
 class BandInterpolator:
+    """Holds the DIS optical-flow instance and computes per-frame FlowBands."""
+
     def __init__(self) -> None:
         self._dis = cv2.DISOpticalFlow_create(DIS_PRESET)
 
@@ -61,13 +66,17 @@ class BandInterpolator:
         if abs(dx_seed) < 1.0:
             return None
         x0, x1 = self._band_x(slit_x, dx_seed, frame_k.shape[1])
-        gk = cv2.cvtColor(frame_k[:, x0:x1], cv2.COLOR_BGR2GRAY)
-        gk1 = cv2.cvtColor(frame_k1[:, x0:x1], cv2.COLOR_BGR2GRAY)
+        if x0 >= x1:
+            return None
+        gk = cv2.cvtColor(np.ascontiguousarray(frame_k[:, x0:x1]), cv2.COLOR_BGR2GRAY)
+        gk1 = cv2.cvtColor(np.ascontiguousarray(frame_k1[:, x0:x1]), cv2.COLOR_BGR2GRAY)
         flow = self._dis.calc(gk, gk1, None)  # (H, x1-x0, 2)
         col = min(max(int(round(slit_x)) - x0, 0), flow.shape[1] - 1)
         fx_col = _smooth1d(flow[:, col, 0], max(3, frame_k.shape[0] // 20))
         dx_refined = float(np.median(fx_col))
         tol = max(RELIABLE_ABS, RELIABLE_FRAC * abs(dx_seed))
         if abs(dx_refined - dx_seed) > tol:
+            log.debug("flow rejected near slit: median Fx %.2f vs seed %.2f (tol %.2f)",
+                      dx_refined, dx_seed, tol)
             return None
         return FlowBand(fx_col=fx_col, dx_refined=dx_refined)
