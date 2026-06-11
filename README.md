@@ -4,6 +4,8 @@ Turn a video of a train passing a **static camera** into a single **wide panoram
 
 It works like a software line-scan (slit-scan) camera: for every frame it estimates how far the train moved, takes a vertical strip of pixels that wide at a fixed column, and stitches the strips together. The moving train is reconstructed at full sharpness across the whole panorama; the static background smears away.
 
+![Example panorama: a passing train reconstructed from a static-camera video](docs/images/panorama-example.png)
+
 ## Install
 
 ```sh
