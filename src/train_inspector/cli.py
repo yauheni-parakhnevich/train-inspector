@@ -64,7 +64,7 @@ def _parse_roi(_ctx, _param, value: str | None) -> decode.Roi | None:
               help="Output width safety cap")
 @click.option("--quality", "jpeg_quality", type=click.IntRange(1, 100), default=95,
               show_default=True, help="JPEG quality if output is .jpg")
-@click.option("--fast", is_flag=True, help="Faster, slightly lower quality (bilinear, no refinement)")
+@click.option("--fast", is_flag=True, help="Faster (bilinear, no flow supersampling); wide single-frame strips")
 @click.option("--debug-dir", type=click.Path(file_okay=False, path_type=Path), default=None,
               help="Write diagnostic artifacts")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose logging")

@@ -103,11 +103,11 @@ The core technique is *motion-compensated strip stitching* (a software slit-scan
 | `--min-speed <px/frame>` | `1.0` | Segment detection threshold only (FR-3). Full-resolution pixels at nominal fps. |
 | `--smooth <float, seconds>` | `0.15` | Velocity smoothing window in **seconds** (timestamp-based; review M4); `0` disables. |
 | `--start/--end <time>` | — | Manual trim. |
-| `--fast` | off | Bilinear instead of Lanczos4 resampling; skips pass-2 refinement (§8). |
+| `--fast` | off | Bilinear resampling; disables flow supersampling — single-frame wide strips (§8). |
 
 ## 6. Non-Functional Requirements
 
-- **NFR-1 Performance:** Process 1080p/60fps **H.264** footage at ≥ 2× real-time on an Apple Silicon laptop (a 60 s clip in ≤ 30 s) (codec pinned per review N12). Memory bounded: mosaic assembled incrementally in chunks; never holds all decoded frames. For long recordings with a short pass (e.g., 20-min clip, 1-min train), pass 1 may use a strided coarse pre-scan (every K-th frame) to bracket candidate motion regions before dense estimation; this is an internal optimization, not user-visible (review Q1).
+- **NFR-1 Performance:** Process 1080p/60fps **H.264** footage at ≥ 2× real-time on an Apple Silicon laptop (a 60 s clip in ≤ 30 s) (codec pinned per review N12). Memory bounded: mosaic assembled incrementally in chunks; never holds all decoded frames. For long recordings with a short pass (e.g., 20-min clip, 1-min train), pass 1 may use a strided coarse pre-scan (every K-th frame) to bracket candidate motion regions before dense estimation; this is an internal optimization, not user-visible (review Q1). The ≥ 2× real-time target is measured on the `--fast` path; the default flow-supersampling path trades speed for seam-free output (one banded dense-flow computation per frame pair). Trial (4K freight_crossing.mp4): `--fast` 8s, default flow 11s.
 - **NFR-2 Quality:** No visible seams or duplicated/missing geometry on constant-speed segments; bounded distortion (mild horizontal stretch/squash) during acceleration is acceptable and documented (§10.5).
 - **NFR-3 Portability:** macOS and Linux; Python ≥ 3.11; OpenCV version **pinned** (rotation/seek behavior varies across builds; review M9/B2).
 - **NFR-4 UX:** Zero-config happy path; all defaults derived from the footage itself.
@@ -132,7 +132,7 @@ Options:
   --scale FLOAT               Downscale factor for output [default: 1.0]
   --max-width INT             Output width safety cap [default: 100000]
   --quality INT               JPEG quality if output is .jpg [default: 95]
-  --fast                      Faster, slightly lower quality (bilinear, no refinement)
+  --fast                      Faster (bilinear, no flow supersampling); wide single-frame strips
   --debug-dir PATH            Write diagnostic artifacts
   -v, --verbose / --quiet
   --version, --help
@@ -159,7 +159,18 @@ Exit codes:
 - **Motion Estimator** — two-pass design:
   - **Pass 1** streams frames at reduced resolution (0.5×, or full resolution if the ROI is already ≤ ~960 px wide), computes the raw displacement/velocity series keyed by **timestamp**. Estimates are rescaled to full-resolution pixels. Smoothing and segment detection run on the full series (smoothing needs future frames — hence two passes).
   - **Pass 2** re-decodes the detected segment at full resolution. **Alignment is by timestamp, not frame index**: seek to a point safely before the segment start (or to t=0 as the always-correct fallback), then read sequentially, matching each decoded frame to the pass-1 series by `CAP_PROP_POS_MSEC` with a tolerance of half the median frame interval. Frame-index-based seeking (`CAP_PROP_POS_FRAMES`) is never used for alignment — OpenCV/FFmpeg seeking is keyframe-based and not frame-accurate on HEVC, open-GOP H.264, and VFR files (review B2). An alignment mismatch (no pass-1 timestamp within tolerance) aborts with exit code 3.
-  - **Pass-2 refinement:** unless `--fast`, each frame's dx is refined by one phase-correlation step at full resolution in a narrow band around the slit, seeded with the pass-1 value — removes the ~2× sub-pixel error inherited from half-res estimation (review M6).
+  - **Pass-2 flow supersampling (default):** each strip is built as a per-row,
+    motion-compensated cross-dissolve between the two frames bounding the
+    interval, using dense optical flow (`cv2.DISOpticalFlow`) in a band around
+    the slit (`composite.py` + `flow.py`). Consecutive strips meet at a shared
+    frame, eliminating the inter-frame seam; per-row flow tiles each row at its
+    own displacement, reducing perspective seams. Strip width still comes from
+    the pass-1 smoothed dx via the carry accumulator (§10.3) — flow refines only
+    the per-row sampling, never the width. The former phase-correlation
+    refinement step (review M6) is removed. Where flow is unreliable (sub-pixel
+    motion, or median flow disagreeing with the pass-1 value — e.g. a uniform
+    car side), the pair falls back to the single-frame wide strip, matching
+    pre-flow quality. `--fast` selects the wide-strip path for the whole pass.
 - **Segment Detector** — hysteresis thresholding on smoothed velocity; selects the longest qualifying segment; resolves direction (FR-3).
 - **Strip Compositor** — maintains the sub-pixel carry accumulator (§10.3); extracts interpolated strips per the geometry in §10.4; applies vertical jitter shift; appends to a preallocated, chunk-grown mosaic buffer.
 - **Encoder** — validates format dimension limits (FR-5); writes the final image; applies `--scale`.
@@ -251,7 +262,7 @@ Equivalently: in both cases the mosaic is built so the train's front is at one e
 
 ## 11. Acceptance Criteria
 
-1. **Constant speed:** synthetic fixture (textured rectangle "train", lossless FFV1, generated in-repo) crossing at constant speed → output width equals train length in pixels ±1%, and pixelwise comparison against the **analytically known source texture** yields SSIM ≥ 0.98 (no stored golden images; review M10).
+1. **Constant speed:** synthetic fixture (textured rectangle "train", lossless FFV1, generated in-repo) crossing at constant speed → output width equals train length in pixels ±1%, and pixelwise comparison against the **analytically known source texture** yields SSIM ≥ 0.98 (measured on the `--fast` wide-strip path — the pure-geometry guarantee; the default flow path is held to SSIM ≥ 0.97 with no seam-energy regression). No stored golden images (review M10).
 2. **Direction:** the same fixture reversed (right-to-left) produces a left-to-right panorama meeting criterion 1.
 3. **Acceleration:** fixture with linear 1×→2× speed → no visible seams; **boundary-correlation metric** ≥ 0.95, defined as: for each strip boundary, the Pearson correlation between the last source-texture column of strip *k* and first column of strip *k+1* as they appear in the output, averaged over all boundaries (review Q2/M10).
 4. **Slow crawl:** fixture at 0.5 px/frame (below `--min-speed`-naive territory) inside a detected segment → full train reconstructed, width ±1% (regression test for B3).
