@@ -211,14 +211,21 @@ def run(opts: Options) -> Result:
             dy_warned = True
 
         dx = _capped_dx(s.dx_smooth, s.dt_ms, med_dx, med_dt)
-        if dx != s.dx_smooth:
+        gap = dx != s.dx_smooth  # a dropped-frame gap was capped
+        if gap:
             n_capped += 1
-        if prev_frame is not None:
-            comp.add(prev_frame, dx, dy_cum, frame_next=frame)
-        else:
-            # First matched frame: emit a single-frame strip (no pair available yet)
+        if prev_frame is None:
+            # First matched frame: single-frame seed strip (no pair available yet)
             # so total strip count stays identical to the original path.
             comp.add(frame, dx, dy_cum)
+        elif gap:
+            # Dropped-frame gap: composite as a single-frame WIDE strip, never a
+            # cross-dissolve. Capping the displacement below the true gap motion
+            # would mis-align the two blended frames (they no longer show the same
+            # surface), re-introducing the very ghost the cap is meant to remove.
+            comp.add(prev_frame, dx, dy_cum)
+        else:
+            comp.add(prev_frame, dx, dy_cum, frame_next=frame)
         n_used += 1
         prev_frame = frame.copy()  # keep a stable copy: next iteration blends against it
 
