@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Large sample media (download separately; see data/README.md)
+data/*.mp4
+data/*.mov
+data/*.mkv
+*_panorama.png
+
+# OS / editor cruft
+.DS_Store
+
+# Generated panoramas and debug artifacts
+output/
