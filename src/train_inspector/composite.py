@@ -53,10 +53,10 @@ class Compositor:
     ) -> int:
         """Feed one in-segment frame pair. Returns strip width taken (may be 0).
 
-        §10.3 accounting FORM is unchanged (total = |dx| + carry_in; w =
-        floor(total); carry_out = total - w). When flow is accepted, the
-        flow-refined dx_refined replaces dx_smooth as the displacement feeding
-        BOTH the carry and the strip width.
+        §10.3 accounting is UNCHANGED and always uses the pass-1 dx_smooth:
+        total = |dx_smooth| + carry_in; w = floor(total); carry_out = total - w.
+        Flow never feeds the width — it is used only to pick the path and to
+        motion-compensate the per-row sampling inside synthesize (seam removal).
         When `interp` and `frame_next` are given and the
         flow is reliable, the w columns are a per-row motion-compensated
         cross-dissolve between `frame` (k) and `frame_next` (k+1), removing the
@@ -65,14 +65,11 @@ class Compositor:
         of `frame`, for BOTH directions; direction is handled purely by assembly
         order in mosaic(). dst(x, y) = src(x + a, y + dy_cum)."""
         flow_band = None
-        dx_used = dx_smooth
         if interp is not None and frame_next is not None:
             flow_band = interp.analyze(frame, frame_next, self.slit_x, dx_smooth)
-            if flow_band is not None:
-                dx_used = flow_band.dx_refined
 
         carry_in = self.carry
-        total = abs(dx_used) + carry_in
+        total = abs(dx_smooth) + carry_in
         w = math.floor(total)
         self.carry = total - w
         if w <= 0:  # sub-pixel step: carry already advanced, no strip this frame
