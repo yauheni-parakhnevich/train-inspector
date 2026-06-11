@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from train_inspector.flow import BandInterpolator
+from train_inspector.flow import BandInterpolator, FlowBand
 from conftest import make_texture
 
 H = 160
@@ -39,3 +39,34 @@ def test_analyze_rejects_when_flow_disagrees_with_seed():
 def test_analyze_rejects_subpixel_seed():
     a, b = _shifted_pair(8.0)
     assert BandInterpolator().analyze(a, b, slit_x=200.0, dx_seed=0.4) is None
+
+
+def test_synthesize_identity_when_frames_equal():
+    """Equal frames + zero flow => the cross-dissolve must reproduce the plain
+    wide strip exactly (blend of identical content), regardless of t."""
+    tex = make_texture(440, H, 3)
+    frame = cv2.warpAffine(
+        tex, np.array([[1.0, 0, 0], [0, 1.0, 0]]), (400, H), flags=cv2.INTER_LANCZOS4
+    )
+    fb = FlowBand(fx_col=np.zeros(H), dx_refined=5.0)
+    strip = BandInterpolator().synthesize(
+        fb, frame, frame, slit_x=200.0, carry_in=0.0, w=5,
+        dy_cum=0.0, direction=-1, interp_flag=cv2.INTER_LINEAR,
+    )
+    expected = frame[:, 200:205]
+    assert strip.shape == (H, 5, 3)
+    assert np.abs(strip.astype(int) - expected.astype(int)).mean() < 1.0
+
+
+def test_synthesize_tau_ramps_opposite_by_direction():
+    """t ramps left->right for RTL and right->left for LTR. With a dark frame_k
+    and bright frame_k1 (zero flow) the brightness ramp direction must flip."""
+    h, w = 8, 6
+    a = np.full((h, 400, 3), 50, np.uint8)
+    b = np.full((h, 400, 3), 200, np.uint8)
+    fb = FlowBand(fx_col=np.zeros(h), dx_refined=6.0)
+    bi = BandInterpolator()
+    rtl = bi.synthesize(fb, a, b, 200.0, 0.0, w, 0.0, direction=-1, interp_flag=cv2.INTER_LINEAR)
+    ltr = bi.synthesize(fb, a, b, 200.0, 0.0, w, 0.0, direction=1, interp_flag=cv2.INTER_LINEAR)
+    assert rtl[0, 0, 0] < rtl[0, -1, 0]   # RTL: dark(frame_k) left, bright(frame_k1) right
+    assert ltr[0, 0, 0] > ltr[0, -1, 0]   # LTR: reversed

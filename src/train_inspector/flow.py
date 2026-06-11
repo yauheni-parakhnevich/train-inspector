@@ -80,3 +80,45 @@ class BandInterpolator:
                       dx_refined, dx_seed, tol)
             return None
         return FlowBand(fx_col=fx_col, dx_refined=dx_refined)
+
+    def synthesize(
+        self,
+        fb: FlowBand,
+        frame_k: np.ndarray,
+        frame_k1: np.ndarray,
+        slit_x: float,
+        carry_in: float,
+        w: int,
+        dy_cum: float,
+        direction: int,
+        interp_flag: int,
+    ) -> np.ndarray:
+        """Build the w-column strip as a per-row motion-compensated cross-dissolve.
+
+        S_k  : frame_k  sampled at x = slit - carry_in + c           (the wide strip)
+        S_k1 : frame_k1 sampled at x = slit - carry_in + c + fx(y)   (same surface,
+               motion-compensated per row -> fixes perspective)
+        out[:, c] = (1 - t_c)*S_k[:, c] + t_c*S_k1[:, c]
+
+        t ramps so S_k1's edge abuts the next strip in assembly order (design
+        doc): RTL t=(c+0.5)/w, LTR t=1-(c+0.5)/w. Vertical jitter dy_cum is the
+        same global translation as the wide path (single resample)."""
+        h = frame_k.shape[0]
+        cols = np.arange(w, dtype=np.float32)
+        xs = (slit_x - carry_in) + cols                       # (w,)
+        ys = (np.arange(h, dtype=np.float32) + dy_cum).reshape(h, 1)
+        map_y = np.tile(ys, (1, w)).astype(np.float32)        # (h, w)
+
+        map_x_k = np.tile(xs, (h, 1)).astype(np.float32)      # (h, w)
+        fx = fb.fx_col.astype(np.float32).reshape(h, 1)
+        map_x_k1 = (xs.reshape(1, w) + fx).astype(np.float32)  # (h, w)
+
+        s_k = cv2.remap(frame_k, map_x_k, map_y, interp_flag, borderMode=cv2.BORDER_REPLICATE)
+        s_k1 = cv2.remap(frame_k1, map_x_k1, map_y, interp_flag, borderMode=cv2.BORDER_REPLICATE)
+
+        t = (cols + 0.5) / w
+        if direction > 0:  # LTR: later-frame edge on the left
+            t = 1.0 - t
+        t = t.reshape(1, w, 1).astype(np.float32)
+        out = (1.0 - t) * s_k.astype(np.float32) + t * s_k1.astype(np.float32)
+        return np.clip(out, 0, 255).astype(np.uint8)
