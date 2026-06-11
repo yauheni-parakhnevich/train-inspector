@@ -124,6 +124,24 @@ class TestSmoothing:
         doubled = out[21]
         assert doubled.dx_smooth == pytest.approx(10.0, rel=0.1)  # kept, not clamped
 
+    def test_glitched_dt_keeps_confident_raw_dx(self):
+        """A spurious large Δt (timestamp glitch) where the train moved a NORMAL
+        amount must NOT inflate the displacement. The confident raw estimate is
+        trusted over the velocity prediction; otherwise the inflated wide strip
+        re-samples surface and ghosts the train head."""
+        dt = 33.3
+        samples = [MotionSample(t_ms=0, dt_ms=0, dx=0, dy=0, confidence=0)]
+        t = 0.0
+        for i in range(40):
+            step = dt * 4 if i == 20 else dt  # glitched timestamp: 4× Δt ...
+            t += step
+            # ... but the train moved a NORMAL 5 px (raw, confidently tracked)
+            samples.append(MotionSample(t_ms=t, dt_ms=step, dx=5.0, dy=0.0, confidence=1.0))
+        out = motion.smooth(samples, smooth_s=0.15, nominal_fps=30.0)
+        glitched = out[21]
+        assert glitched.dx_smooth == pytest.approx(5.0, rel=0.2)  # raw kept, NOT ~20
+        assert not glitched.substituted
+
     def test_low_confidence_substituted_with_prediction(self):
         dxs = [5.0] * 15 + [40.0] + [5.0] * 15  # one garbage frame, low confidence
         samples = _samples_from(dxs)

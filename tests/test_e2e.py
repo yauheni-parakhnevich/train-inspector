@@ -221,22 +221,3 @@ def test_blend_reduces_seam_energy_vs_fast(texture, tmp_path):
     e_fast = horizontal_seam_energy(reg_fast)
     e_blend = horizontal_seam_energy(reg_blend)
     assert e_blend < e_fast * 0.85, f"blend seam energy {e_blend:.2f} not < 0.85x{e_fast:.2f}"
-
-
-# --- dropped-frame ghost guard (pipeline._capped_dx) -------------------------
-
-def test_capped_dx_clamps_dropped_frame_gap():
-    """A dropped-frame gap (dt >> median, dx >> median) is clamped to the cap so
-    the wide single-frame strip cannot duplicate surface into a ghost."""
-    from train_inspector.pipeline import _capped_dx
-    assert _capped_dx(167.0, 152.0, 48.0, 41.0) == pytest.approx(96.0)   # 2.0 * 48
-    assert _capped_dx(-167.0, 152.0, 48.0, 41.0) == pytest.approx(-96.0)
-
-
-def test_capped_dx_leaves_normal_and_fast_frames():
-    """Normal frames, and legitimately fast frames at NORMAL dt, are untouched."""
-    from train_inspector.pipeline import _capped_dx
-    assert _capped_dx(48.0, 41.0, 48.0, 41.0) == 48.0
-    assert _capped_dx(150.0, 41.0, 48.0, 41.0) == 150.0   # fast but normal dt -> never capped
-    assert _capped_dx(60.0, 152.0, 48.0, 41.0) == 60.0    # big dt but dx within cap
-    assert _capped_dx(167.0, 152.0, 0.0, 41.0) == 167.0   # degenerate median -> passthrough

@@ -22,6 +22,8 @@ STATIC_DX = 0.3  # px; |median dx| below this = static (background) cluster
 CLUSTER_GAP = 1.5  # px; 1-D gap-split merge radius
 MIN_CONFIDENCE = 0.3
 PHASE_BAND_HALF_W = 64  # px around slit for phase-correlation fallback
+RAW_TRUST_CONF = 0.6  # a confident raw estimate is trusted over a velocity outlier...
+DT_ANOMALY_FACTOR = 1.5  # ...when its dt is spuriously large (timestamp glitch)
 
 _LK_PARAMS = dict(
     winSize=(21, 21),
@@ -258,6 +260,25 @@ def smooth(samples: list[MotionSample], smooth_s: float, nominal_fps: float) -> 
         s.dx_smooth = float(vx_s[i] * dt_s[i])
         s.dy_smooth = float(vy_s[i] * dt_s[i])
         s.substituted = bool(low[i] or bad[i])
+
+    # A confident raw estimate that was rejected as a velocity OUTLIER only
+    # because its dt is spuriously large (a timestamp glitch — VFR / container
+    # PTS hiccup) must be trusted, not replaced by the velocity prediction. The
+    # large dt otherwise inflates a correct displacement (e.g. 46 px) into a wide
+    # extrapolated strip (e.g. 167 px) that re-samples surface the neighbouring
+    # strips already cover — a visible GHOST near the train head. LK confidently
+    # tracked the true inter-frame motion, so use it. Genuine dropped frames fail
+    # LK (low confidence) and correctly keep the velocity prediction.
+    dt_ms = np.array([s.dt_ms for s in out])
+    pos_dt = dt_ms[dt_ms > 0]
+    med_dt = float(np.median(pos_dt)) if len(pos_dt) else 0.0
+    for i, s in enumerate(out):
+        if (bad[i] and not low[i] and s.confidence >= RAW_TRUST_CONF
+                and med_dt > 0 and s.dt_ms > DT_ANOMALY_FACTOR * med_dt):
+            s.dx_smooth = s.dx
+            s.dy_smooth = s.dy
+            s.substituted = False
+
     out[0].dx_smooth = 0.0
     return out
 
