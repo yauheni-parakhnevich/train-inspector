@@ -3,8 +3,9 @@
 Pass 1: reduced-resolution motion estimation over the (trimmed) clip.
 Pass 2: full-resolution re-decode of the detected segment, aligned by
 TIMESTAMP with tolerance of half the median frame interval — never by frame
-index (review B2). Optional per-frame phase-correlation refinement near the
-slit (review M6).
+index (review B2). Optional per-frame flow-based cross-dissolve supersampling
+near the slit (flow.BandInterpolator; --fast disables it and uses
+single-frame wide strips).
 """
 
 from __future__ import annotations
@@ -168,7 +169,7 @@ def run(opts: Options) -> Result:
     # forms a pair with the previous matched frame; the first only seeds prev.
     idx = 0
     n_matched = 0
-    n_used = 0
+    n_used = 0  # strips contributed (includes the first-frame seed strip)
     dy_cum = 0.0
     dy_warned = False
     prev_frame: np.ndarray | None = None

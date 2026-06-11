@@ -64,16 +64,16 @@ class Compositor:
         strip is taken: source region [x_slit - carry_in, x_slit - carry_in + w)
         of `frame`, for BOTH directions; direction is handled purely by assembly
         order in mosaic(). dst(x, y) = src(x + a, y + dy_cum)."""
-        flow_band = None
-        if interp is not None and frame_next is not None:
-            flow_band = interp.analyze(frame, frame_next, self.slit_x, dx_smooth)
-
         carry_in = self.carry
         total = abs(dx_smooth) + carry_in
         w = math.floor(total)
         self.carry = total - w
         if w <= 0:  # sub-pixel step: carry already advanced, no strip this frame
             return 0
+
+        flow_band = None
+        if interp is not None and frame_next is not None:
+            flow_band = interp.analyze(frame, frame_next, self.slit_x, dx_smooth)
 
         if flow_band is not None:
             strip = interp.synthesize(
