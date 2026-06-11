@@ -1,0 +1,30 @@
+[project]
+name = "train-inspector"
+version = "0.1.0"
+description = "Produce a wide panoramic photo of a passing train from a static-camera video"
+readme = "README.md"
+authors = [
+    { name = "Eugene", email = "yauheni.parakhnevich@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "opencv-python>=4.10,<4.13",
+    "numpy>=1.26",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+debug = ["matplotlib>=3.8"]
+
+[project.scripts]
+train-inspector = "train_inspector.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["uv_build>=0.9.16,<0.10.0"]
+build-backend = "uv_build"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]

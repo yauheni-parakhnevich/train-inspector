@@ -1,9 +1,34 @@
 # Flow-Based Sub-Time Supersampling at the Slit — Design
 
-**Status:** Approved design (brainstorm)
+**Status:** Superseded during implementation — see Revision note.
 **Date:** 2026-06-11
 **Author:** Eugene
 **Relates to:** `spec/SPEC.md` §10.3 (carry accumulator), §10.4 (strip geometry), §8 (two-pass), §11 (acceptance)
+
+> ## ⚠️ Revision (2026-06-11, post-implementation)
+> The **per-row dense optical flow** at the heart of this design did not survive
+> contact with real footage and was **replaced by a global cross-dissolve**.
+>
+> **What changed.** Sections 5–7 below specify `cv2.DISOpticalFlow` in a band
+> around the slit, sampling per-row flow `fx_col(y)` to motion-compensate the
+> cross-dissolve (for perspective correction). Empirically DIS is accurate only
+> to ~20 px/frame and returns near-zero / wrong-sign motion at the ~50 px/frame
+> the target clip exhibits — it *injected noise* and made seams slightly worse
+> on real footage.
+>
+> **Shipped instead.** The cross-dissolve mechanism (Section 5) is kept — it is
+> what removes the seam — but the per-row shift is the **known pass-1 dx,
+> uniform across rows** (no optical flow, no band, no reliability gate). This is
+> simpler, cheaper (one extra warp vs a DIS pass), robust at any speed, and
+> measured **−26% vertical-line energy** on the real 50 px/frame clip (vs a
+> *regression* with per-row flow). Perspective correction is dropped (it was
+> unachievable at speed anyway). The synthesizer lives in `composite._crossfade`;
+> there is no `flow.py`.
+>
+> Read Sections 5 (geometry/τ-ramp) and 10 (testing) as still-accurate; treat
+> the DIS/`analyze`/band/fallback machinery in Sections 5–7, 11 as **the
+> rejected approach**, retained as a record. `spec/SPEC.md` §8 reflects the
+> shipped behavior.
 
 ## 1. Problem
 
