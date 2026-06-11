@@ -190,34 +190,34 @@ def test_cli_exit_2_no_motion(tmp_path):
     assert "no train motion" in proc.stderr
 
 
-FLOW_SSIM = 0.97  # default flow path: cross-dissolve softens slightly vs --fast's 0.98
+BLEND_SSIM = 0.97  # default cross-dissolve path: blend softens slightly vs --fast's 0.98
 
 
-def test_constant_speed_flow_path_no_regression(video_constant_ltr, texture, tmp_path):
-    """Default (flow) path on a rigid fixture: width +/-1%, SSIM >= 0.97. Flow must
+def test_constant_speed_blend_path_no_regression(video_constant_ltr, texture, tmp_path):
+    """Default (cross-dissolve) path on a rigid fixture: width +/-1%, SSIM >= 0.97. Blend must
     keep geometry while removing seams."""
     out = tmp_path / "pano.png"
-    _run(video_constant_ltr, out)  # default: flow ON
+    _run(video_constant_ltr, out)  # default: blend ON
     pano = cv2.imread(str(out))
     region = extract_train_region(pano, TRAIN_Y, TRAIN_H)
     assert abs(region.shape[1] - TEX_LEN) <= TEX_LEN * 0.01
-    assert align_and_ssim(region, texture) >= FLOW_SSIM
+    assert align_and_ssim(region, texture) >= BLEND_SSIM
 
 
-def test_flow_reduces_seam_energy_vs_fast(texture, tmp_path):
+def test_blend_reduces_seam_energy_vs_fast(texture, tmp_path):
     """Headline regression: on a brightness-flicker fixture the wide-strip
-    (--fast) path stamps a hard brightness step at every boundary; the flow
-    cross-dissolve smooths them, lowering horizontal seam energy."""
+    (--fast) path stamps a hard brightness step at every boundary; the cross-dissolve
+    path smooths them, lowering horizontal seam energy."""
     positions = constant_speed_positions(SPEED, TEX_LEN)
     video = write_video(tmp_path / "flicker.avi", flicker_frames(texture, positions))
 
     out_fast = tmp_path / "fast.png"
     _run(video, out_fast, fast=True)
-    out_flow = tmp_path / "flow.png"
-    _run(video, out_flow)  # default: flow ON
+    out_blend = tmp_path / "blend.png"
+    _run(video, out_blend)  # default: blend ON
 
     reg_fast = extract_train_region(cv2.imread(str(out_fast)), TRAIN_Y, TRAIN_H)
-    reg_flow = extract_train_region(cv2.imread(str(out_flow)), TRAIN_Y, TRAIN_H)
+    reg_blend = extract_train_region(cv2.imread(str(out_blend)), TRAIN_Y, TRAIN_H)
     e_fast = horizontal_seam_energy(reg_fast)
-    e_flow = horizontal_seam_energy(reg_flow)
-    assert e_flow < e_fast * 0.85, f"flow seam energy {e_flow:.2f} not < 0.85x{e_fast:.2f}"
+    e_blend = horizontal_seam_energy(reg_blend)
+    assert e_blend < e_fast * 0.85, f"blend seam energy {e_blend:.2f} not < 0.85x{e_fast:.2f}"

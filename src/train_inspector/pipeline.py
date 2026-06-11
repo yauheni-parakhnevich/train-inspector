@@ -206,7 +206,7 @@ def run(opts: Options) -> Result:
             # so total strip count stays identical to the original path.
             comp.add(frame, s.dx_smooth, dy_cum)
         n_used += 1
-        prev_frame = frame
+        prev_frame = frame.copy()  # keep a stable copy: next iteration blends against it
 
     matched_frac = n_matched / len(seg_samples)
     if matched_frac < 0.9:
