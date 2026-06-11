@@ -24,8 +24,6 @@ PASS1_SCALE = 0.5
 PASS1_FULLRES_ROI_W = 960  # ROI narrower than this → pass 1 runs at full res (spec §8)
 BLUR_WARN_DX = 25.0  # px/frame (review N10)
 DY_WARN_FRAC = 0.02  # cumulative |dy| beyond 2% of height → "camera not static"
-DROP_DT_FACTOR = 1.5  # dt beyond this × median dt marks a dropped-frame gap
-MAX_STRIP_FACTOR = 2.0  # cap a dropped-frame strip at this × median dx (ghost guard)
 
 
 class NoMotionError(Exception):
@@ -168,18 +166,9 @@ def run(opts: Options) -> Result:
     # region, so we advance a cursor over seg_samples and match each decoded
     # frame to at most one sample within tolerance (spec §8). Each matched frame
     # forms a pair with the previous matched frame; the first only seeds prev.
-    # Dropped-frame ghost guard (see _capped_dx): a gap with a spiked dt would
-    # otherwise emit a wide single-frame strip that ghosts. Cap relative to the
-    # segment medians.
-    _abs_dx = [abs(s.dx_smooth) for s in seg_samples if abs(s.dx_smooth) > 0.5]
-    med_dx = float(np.median(_abs_dx)) if _abs_dx else 0.0
-    _dts = [s.dt_ms for s in seg_samples if s.dt_ms > 0]
-    med_dt = float(np.median(_dts)) if _dts else 0.0
-
     idx = 0
     n_matched = 0
     n_used = 0  # strips contributed (includes the first-frame seed strip)
-    n_capped = 0
     dy_cum = 0.0
     dy_warned = False
     prev_frame: np.ndarray | None = None
@@ -210,30 +199,14 @@ def run(opts: Options) -> Result:
             log.warning("cumulative vertical drift %.1f px — camera does not look static", dy_cum)
             dy_warned = True
 
-        dx = _capped_dx(s.dx_smooth, s.dt_ms, med_dx, med_dt)
-        gap = dx != s.dx_smooth  # a dropped-frame gap was capped
-        if gap:
-            n_capped += 1
-        if prev_frame is None:
-            # First matched frame: single-frame seed strip (no pair available yet)
-            # so total strip count stays identical to the original path.
-            comp.add(frame, dx, dy_cum)
-        elif gap:
-            # Dropped-frame gap: composite as a single-frame WIDE strip, never a
-            # cross-dissolve. Capping the displacement below the true gap motion
-            # would mis-align the two blended frames (they no longer show the same
-            # surface), re-introducing the very ghost the cap is meant to remove.
-            comp.add(prev_frame, dx, dy_cum)
+        if prev_frame is not None:
+            comp.add(prev_frame, s.dx_smooth, dy_cum, frame_next=frame)
         else:
-            comp.add(prev_frame, dx, dy_cum, frame_next=frame)
+            # First matched frame: emit a single-frame strip (no pair available yet)
+            # so total strip count stays identical to the original path.
+            comp.add(frame, s.dx_smooth, dy_cum)
         n_used += 1
         prev_frame = frame.copy()  # keep a stable copy: next iteration blends against it
-
-    if n_capped:
-        log.warning(
-            "%d dropped-frame gap(s) capped to avoid ghosting; the train is "
-            "slightly compressed there (the missing frames are unrecoverable)", n_capped,
-        )
 
     matched_frac = n_matched / len(seg_samples)
     if matched_frac < 0.9:
@@ -252,23 +225,3 @@ def run(opts: Options) -> Result:
         output=opts.output, width=out_w, height=int(mosaic.shape[0] * opts.scale),
         direction="ltr" if direction > 0 else "rtl", n_frames=n_used, mean_dx=mean_dx,
     )
-
-
-def _capped_dx(dx_smooth: float, dt_ms: float, med_dx: float, med_dt: float) -> float:
-    """Clamp the strip displacement for a DROPPED-FRAME gap.
-
-    When frames are dropped the inter-frame interval (dt) spikes and velocity
-    smoothing legitimately scales dx up to fill the gap (review M4). But a single
-    decoded frame cannot represent a multi-frame temporal sweep: the velocity-
-    extrapolated wide strip re-samples surface the neighbouring strips already
-    cover, leaving a GHOST — a faint duplicate of the train near the gap. The
-    dropped-frame surface is unrecoverable without the missing frames, so we cap
-    the strip width: a small, locally-invisible compression instead of a visible
-    ghost. Only frames whose dt is abnormally large are capped — a legitimately
-    fast frame at a normal dt is never touched."""
-    if med_dx <= 0 or med_dt <= 0:
-        return dx_smooth
-    cap = MAX_STRIP_FACTOR * med_dx
-    if dt_ms > DROP_DT_FACTOR * med_dt and abs(dx_smooth) > cap:
-        return cap if dx_smooth > 0 else -cap
-    return dx_smooth
