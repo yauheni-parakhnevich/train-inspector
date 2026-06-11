@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 import cv2
 from conftest import make_texture
-from train_inspector.flow import BandInterpolator
 
 from train_inspector.composite import Compositor
 
@@ -88,35 +87,55 @@ def test_vertical_jitter_shift():
     assert out[10, :, 0].mean() < 50
 
 
-class _StubReject:
-    """Interp whose flow is always rejected -> must behave like the wide path.
+def test_crossfade_aligned_pair_reproduces_surface():
+    """frame_k1 = frame_k shifted by dx; the dx-compensated blend lands on the
+    SAME surface, so the strip reproduces frame_k's columns at the slit."""
+    tex = make_texture(440, 160, seed=3)
+    place = lambda off: cv2.warpAffine(
+        tex, np.array([[1.0, 0, off], [0, 1.0, 0]]), (400, 160), flags=cv2.INTER_LANCZOS4
+    )
+    a, b = place(0.0), place(6.0)
+    comp = Compositor(height=160, direction=-1, slit_x=200.0)  # blend on
+    comp.add(a, 6.0, frame_next=b)
+    strip = comp.mosaic()
+    expected = a[:, 200:206]  # w = 6
+    assert strip.shape == (160, 6, 3)
+    assert np.abs(strip.astype(int) - expected.astype(int)).mean() < 2.0
 
-    synthesize is intentionally absent: it must never be reached when analyze
-    returns None.
-    """
 
-    def analyze(self, *a, **k):
-        return None
+def test_crossfade_tau_ramps_opposite_by_direction():
+    """Dark frame_k, bright frame_k1: the blend ramps across the strip, and the
+    ramp direction flips between RTL and LTR (assembly-order convention)."""
+    h = 8
+    a = np.full((h, 400, 3), 50, np.uint8)
+    b = np.full((h, 400, 3), 200, np.uint8)
+    rtl = Compositor(height=h, direction=-1, slit_x=200.0)
+    rtl.add(a, 6.0, frame_next=b)
+    ltr = Compositor(height=h, direction=1, slit_x=200.0)
+    ltr.add(a, 6.0, frame_next=b)
+    r, l = rtl.mosaic(), ltr.mosaic()
+    assert r[0, 0, 0] < r[0, -1, 0]   # RTL: dark(frame_k) left, bright(frame_k1) right
+    assert l[0, 0, 0] > l[0, -1, 0]   # LTR: reversed
 
 
-def test_add_falls_back_to_wide_strip_when_flow_rejected():
+def test_fast_uses_wide_strip_ignoring_frame_next():
+    """--fast must take the single-frame wide strip even when frame_next given."""
     frame = gradient_frame()
-    comp = Compositor(height=20, direction=1, slit_x=100.0)
-    w_flow = comp.add(frame, 5.0, frame_next=frame, interp=_StubReject())
-    comp2 = Compositor(height=20, direction=1, slit_x=100.0)
-    w_plain = comp2.add(frame, 5.0)
-    assert w_flow == w_plain == 5
-    np.testing.assert_array_equal(comp.mosaic(), comp2.mosaic())
+    fast = Compositor(height=20, direction=1, slit_x=100.0, fast=True)
+    w1 = fast.add(frame, 5.0, frame_next=frame)
+    plain = Compositor(height=20, direction=1, slit_x=100.0, fast=True)
+    w2 = plain.add(frame, 5.0)
+    assert w1 == w2 == 5
+    np.testing.assert_array_equal(fast.mosaic(), plain.mosaic())
 
 
-def test_add_flow_path_preserves_carry_width():
-    """Real interp on a moving pair: sum of widths still tracks sum of |dx_refined|."""
+def test_blend_preserves_carry_width():
+    """Width is the pass-1 dx via the carry accumulator; Sum w tracks Sum|dx|."""
     tex = make_texture(440, 160, seed=3)
     place = lambda off: cv2.warpAffine(
         tex, np.array([[1.0, 0, off], [0, 1.0, 0]]), (400, 160), flags=cv2.INTER_LANCZOS4
     )
     a, b = place(0.0), place(6.0)
     comp = Compositor(height=160, direction=1, slit_x=200.0)
-    interp = BandInterpolator()
-    total = sum(comp.add(a, 6.0, frame_next=b, interp=interp) for _ in range(20))
-    assert abs(total - 6 * 20) <= 20  # carry bound is <1px; wider slack covers dx_refined vs seed deviation
+    total = sum(comp.add(a, 6.0, frame_next=b) for _ in range(20))
+    assert abs(total - 6 * 20) < 1.0

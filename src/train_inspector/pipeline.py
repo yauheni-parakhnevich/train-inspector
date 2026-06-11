@@ -3,9 +3,9 @@
 Pass 1: reduced-resolution motion estimation over the (trimmed) clip.
 Pass 2: full-resolution re-decode of the detected segment, aligned by
 TIMESTAMP with tolerance of half the median frame interval — never by frame
-index (review B2). Optional per-frame flow-based cross-dissolve supersampling
-near the slit (flow.BandInterpolator; --fast disables it and uses
-single-frame wide strips).
+index (review B2). Each strip is a motion-compensated cross-dissolve between
+the pair of frames bounding the interval, aligned by the pass-1 dx
+(composite._crossfade); --fast disables it and uses single-frame wide strips.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import composite, decode, diagnostics, encode, flow, motion, segment
+from . import composite, decode, diagnostics, encode, motion, segment
 
 log = logging.getLogger(__name__)
 
@@ -147,11 +147,10 @@ def run(opts: Options) -> Result:
     )
 
     # ---- Pass 2: full-res composite, timestamp-aligned ----
-    # Pass 2 builds each strip as a per-row motion-compensated cross-dissolve
-    # between the pair of frames bounding the interval (flow.py), removing the
-    # inter-frame seam. The flow's per-row median also subsumes the old
-    # phase-correlation refinement. --fast keeps the original wide-strip path.
-    interp = None if opts.fast else flow.BandInterpolator()
+    # Each strip is a motion-compensated cross-dissolve between the pair of
+    # frames bounding the interval (composite._crossfade), aligned by the pass-1
+    # dx, so the inter-frame boundary is smoothed instead of showing as a seam.
+    # --fast keeps the original single-frame wide-strip path.
     comp = composite.Compositor(roi_h, direction, slit_x, fast=opts.fast)
     t_first, t_last = seg_samples[0].t_ms, seg_samples[-1].t_ms
     dt_med = float(np.median([s.dt_ms for s in samples[1:] if s.dt_ms > 0])) or 33.3
@@ -201,7 +200,7 @@ def run(opts: Options) -> Result:
             dy_warned = True
 
         if prev_frame is not None:
-            comp.add(prev_frame, s.dx_smooth, dy_cum, frame_next=frame, interp=interp)
+            comp.add(prev_frame, s.dx_smooth, dy_cum, frame_next=frame)
         else:
             # First matched frame: emit a single-frame strip (no pair available yet)
             # so total strip count stays identical to the original path.
