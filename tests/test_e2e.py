@@ -16,9 +16,9 @@ from train_inspector.encode import OutputError
 
 from conftest import (
     FRAME_H, FRAME_W, TRAIN_H, TRAIN_Y,
-    constant_speed_positions, make_background, make_texture, render_frames, write_video,
+    constant_speed_positions, flicker_frames, make_background, make_texture, render_frames, write_video,
 )
-from helpers import align_and_ssim, extract_train_region
+from helpers import align_and_ssim, extract_train_region, horizontal_seam_energy
 
 TEX_LEN = 1200
 # Integer speed renders the fixture train at integer positions → no sub-pixel
@@ -53,7 +53,7 @@ def video_constant_ltr(texture, tmp_path_factory) -> Path:
 def test_constant_speed_ltr(video_constant_ltr, texture, tmp_path):
     """§11.1: width ±1%, SSIM ≥ 0.98 vs analytic texture."""
     out = tmp_path / "pano.png"
-    result = _run(video_constant_ltr, out)
+    result = _run(video_constant_ltr, out, fast=True)  # strict SSIM >= 0.98 = pure-geometry path
     pano = cv2.imread(str(out))
     assert pano is not None
 
@@ -68,7 +68,7 @@ def test_constant_speed_rtl(texture, tmp_path):
     positions = constant_speed_positions(SPEED, TEX_LEN)[::-1]
     video = write_video(tmp_path / "rtl.avi", render_frames(texture, positions))
     out = tmp_path / "pano.png"
-    result = _run(video, out)
+    result = _run(video, out, fast=True)  # strict SSIM >= 0.98 = pure-geometry path
     assert result.direction == "rtl"
 
     pano = cv2.imread(str(out))
@@ -188,3 +188,36 @@ def test_cli_exit_2_no_motion(tmp_path):
     )
     assert proc.returncode == 2
     assert "no train motion" in proc.stderr
+
+
+FLOW_SSIM = 0.97  # default flow path: cross-dissolve softens slightly vs --fast's 0.98
+
+
+def test_constant_speed_flow_path_no_regression(video_constant_ltr, texture, tmp_path):
+    """Default (flow) path on a rigid fixture: width +/-1%, SSIM >= 0.97. Flow must
+    keep geometry while removing seams."""
+    out = tmp_path / "pano.png"
+    _run(video_constant_ltr, out)  # default: flow ON
+    pano = cv2.imread(str(out))
+    region = extract_train_region(pano, TRAIN_Y, TRAIN_H)
+    assert abs(region.shape[1] - TEX_LEN) <= TEX_LEN * 0.01
+    assert align_and_ssim(region, texture) >= FLOW_SSIM
+
+
+def test_flow_reduces_seam_energy_vs_fast(texture, tmp_path):
+    """Headline regression: on a brightness-flicker fixture the wide-strip
+    (--fast) path stamps a hard brightness step at every boundary; the flow
+    cross-dissolve smooths them, lowering horizontal seam energy."""
+    positions = constant_speed_positions(SPEED, TEX_LEN)
+    video = write_video(tmp_path / "flicker.avi", flicker_frames(texture, positions))
+
+    out_fast = tmp_path / "fast.png"
+    _run(video, out_fast, fast=True)
+    out_flow = tmp_path / "flow.png"
+    _run(video, out_flow)  # default: flow ON
+
+    reg_fast = extract_train_region(cv2.imread(str(out_fast)), TRAIN_Y, TRAIN_H)
+    reg_flow = extract_train_region(cv2.imread(str(out_flow)), TRAIN_Y, TRAIN_H)
+    e_fast = horizontal_seam_energy(reg_fast)
+    e_flow = horizontal_seam_energy(reg_flow)
+    assert e_flow < e_fast * 0.85, f"flow seam energy {e_flow:.2f} not < 0.85x{e_fast:.2f}"
