@@ -104,12 +104,14 @@ class BandInterpolator:
         doc): RTL t=(c+0.5)/w, LTR t=1-(c+0.5)/w. Vertical jitter dy_cum is the
         same global translation as the wide path (single resample)."""
         h = frame_k.shape[0]
+        if fb.fx_col.shape[0] != h:
+            raise ValueError(f"fx_col length {fb.fx_col.shape[0]} != frame height {h}")
         cols = np.arange(w, dtype=np.float32)
         xs = (slit_x - carry_in) + cols                       # (w,)
         ys = (np.arange(h, dtype=np.float32) + dy_cum).reshape(h, 1)
-        map_y = np.tile(ys, (1, w)).astype(np.float32)        # (h, w)
+        map_y = np.tile(ys, (1, w))        # already float32
 
-        map_x_k = np.tile(xs, (h, 1)).astype(np.float32)      # (h, w)
+        map_x_k = np.tile(xs, (h, 1))      # already float32
         fx = fb.fx_col.astype(np.float32).reshape(h, 1)
         map_x_k1 = (xs.reshape(1, w) + fx).astype(np.float32)  # (h, w)
 

@@ -44,10 +44,7 @@ def test_analyze_rejects_subpixel_seed():
 def test_synthesize_identity_when_frames_equal():
     """Equal frames + zero flow => the cross-dissolve must reproduce the plain
     wide strip exactly (blend of identical content), regardless of t."""
-    tex = make_texture(440, H, 3)
-    frame = cv2.warpAffine(
-        tex, np.array([[1.0, 0, 0], [0, 1.0, 0]]), (400, H), flags=cv2.INTER_LANCZOS4
-    )
+    frame = make_texture(400, H, 3)
     fb = FlowBand(fx_col=np.zeros(H), dx_refined=5.0)
     strip = BandInterpolator().synthesize(
         fb, frame, frame, slit_x=200.0, carry_in=0.0, w=5,
@@ -70,3 +67,17 @@ def test_synthesize_tau_ramps_opposite_by_direction():
     ltr = bi.synthesize(fb, a, b, 200.0, 0.0, w, 0.0, direction=1, interp_flag=cv2.INTER_LINEAR)
     assert rtl[0, 0, 0] < rtl[0, -1, 0]   # RTL: dark(frame_k) left, bright(frame_k1) right
     assert ltr[0, 0, 0] > ltr[0, -1, 0]   # LTR: reversed
+
+
+def test_synthesize_motion_compensation_aligns_surfaces():
+    """With matched per-row flow, frame_k1 is sampled at x+fx so it lands on the
+    SAME surface as frame_k; the blend then reproduces frame_k's columns."""
+    dx = 6.0
+    a, b = _shifted_pair(dx)
+    fb = FlowBand(fx_col=np.full(H, dx, dtype=np.float64), dx_refined=dx)
+    strip = BandInterpolator().synthesize(
+        fb, a, b, slit_x=200.0, carry_in=0.0, w=5,
+        dy_cum=0.0, direction=-1, interp_flag=cv2.INTER_LINEAR,
+    )
+    expected = a[:, 200:205]
+    assert np.abs(strip.astype(int) - expected.astype(int)).mean() < 2.0
