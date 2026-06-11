@@ -89,7 +89,11 @@ def test_vertical_jitter_shift():
 
 
 class _StubReject:
-    """Interp whose flow is always rejected -> must behave like the wide path."""
+    """Interp whose flow is always rejected -> must behave like the wide path.
+
+    synthesize is intentionally absent: it must never be reached when analyze
+    returns None.
+    """
 
     def analyze(self, *a, **k):
         return None
@@ -107,7 +111,7 @@ def test_add_falls_back_to_wide_strip_when_flow_rejected():
 
 def test_add_flow_path_preserves_carry_width():
     """Real interp on a moving pair: sum of widths still tracks sum of |dx_refined|."""
-    tex = make_texture(440, 160, 3)
+    tex = make_texture(440, 160, seed=3)
     place = lambda off: cv2.warpAffine(
         tex, np.array([[1.0, 0, off], [0, 1.0, 0]]), (400, 160), flags=cv2.INTER_LANCZOS4
     )
@@ -115,4 +119,4 @@ def test_add_flow_path_preserves_carry_width():
     comp = Compositor(height=160, direction=1, slit_x=200.0)
     interp = BandInterpolator()
     total = sum(comp.add(a, 6.0, frame_next=b, interp=interp) for _ in range(20))
-    assert abs(total - 6 * 20) <= 20  # within ~1 px/frame of sum|dx|
+    assert abs(total - 6 * 20) <= 20  # carry bound is <1px; wider slack covers dx_refined vs seed deviation

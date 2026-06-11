@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .flow import BandInterpolator
 
 import cv2
 import numpy as np
@@ -45,35 +49,38 @@ class Compositor:
         dx_smooth: float,
         dy_cum: float = 0.0,
         frame_next: np.ndarray | None = None,
-        interp=None,
+        interp: "BandInterpolator | None" = None,
     ) -> int:
         """Feed one in-segment frame pair. Returns strip width taken (may be 0).
 
-        §10.3 accounting is UNCHANGED: total = |dx| + carry_in; w = floor(total);
-        carry_out = total - w. When `interp` and `frame_next` are given and the
+        §10.3 accounting FORM is unchanged (total = |dx| + carry_in; w =
+        floor(total); carry_out = total - w). When flow is accepted, the
+        flow-refined dx_refined replaces dx_smooth as the displacement feeding
+        BOTH the carry and the strip width.
+        When `interp` and `frame_next` are given and the
         flow is reliable, the w columns are a per-row motion-compensated
         cross-dissolve between `frame` (k) and `frame_next` (k+1), removing the
         inter-frame seam (see flow.py). Otherwise the original single-frame wide
         strip is taken: source region [x_slit - carry_in, x_slit - carry_in + w)
         of `frame`, for BOTH directions; direction is handled purely by assembly
         order in mosaic(). dst(x, y) = src(x + a, y + dy_cum)."""
-        fb = None
+        flow_band = None
         dx_used = dx_smooth
         if interp is not None and frame_next is not None:
-            fb = interp.analyze(frame, frame_next, self.slit_x, dx_smooth)
-            if fb is not None:
-                dx_used = fb.dx_refined
+            flow_band = interp.analyze(frame, frame_next, self.slit_x, dx_smooth)
+            if flow_band is not None:
+                dx_used = flow_band.dx_refined
 
         carry_in = self.carry
         total = abs(dx_used) + carry_in
         w = math.floor(total)
         self.carry = total - w
-        if w <= 0:
+        if w <= 0:  # sub-pixel step: carry already advanced, no strip this frame
             return 0
 
-        if fb is not None:
+        if flow_band is not None:
             strip = interp.synthesize(
-                fb, frame, frame_next, self.slit_x, carry_in, w,
+                flow_band, frame, frame_next, self.slit_x, carry_in, w,
                 dy_cum, self.direction, self.interp,
             )
         else:
